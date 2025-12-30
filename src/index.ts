@@ -4,108 +4,210 @@ import {
 	WorkflowStep,
 } from "cloudflare:workers";
 
-/**
- * Welcome to Cloudflare Workers! This is your first Workflows application.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your Workflow in action
- * - Run `npm run deploy` to publish your application
- *
- * Learn more at https://developers.cloudflare.com/workflows
- */
- 
-// User-defined params passed to your Workflow
-type Params = {
-	email: string;
-	metadata: Record<string, string>;
+// -----------------------------------------------------------------------------
+// Type Definitions
+// -----------------------------------------------------------------------------
+
+export interface Env {
+	AI: Ai;
+	PROMPT_WORKFLOW: Workflow;
+}
+
+// Input payload expected from the user
+type WorkflowInput = {
+	prompt: string;
+	targetModel?: string; // e.g., "GPT-4", "Llama 3"
+	tone?: "professional" | "creative" | "academic" | "concise";
 };
 
-export class MyWorkflow extends WorkflowEntrypoint<Env, Params> {
-	async run(event: WorkflowEvent<Params>, step: WorkflowStep) {
-		// Can access bindings on `this.env`
-		// Can access params on `event.payload`
+// Step 1 Output: Analysis of the input
+type AnalysisResult = {
+	intent: string;
+	strengths: string[];
+	weaknesses: string[];
+	missing_context: boolean;
+};
 
-		const files = await step.do("my first step", async () => {
-			// Fetch a list of files from $SOME_SERVICE
-			return {
-				inputParams: event,
-				files: [
-					"doc_7392_rev3.pdf",
-					"report_x29_final.pdf",
-					"memo_2024_05_12.pdf",
-					"file_089_update.pdf",
-					"proj_alpha_v2.pdf",
-					"data_analysis_q2.pdf",
-					"notes_meeting_52.pdf",
-					"summary_fy24_draft.pdf",
+// Step 2 Output: Selected Strategy
+type StrategyResult = {
+	technique: "CO-STAR" | "Chain-of-Thought" | "Role-Prompting" | "Few-Shot";
+	reasoning: string;
+	suggested_role: string;
+};
+
+// Final Output
+type FinalResult = {
+	original: string;
+	enhanced_prompt: string;
+	technique_used: string;
+	changelog: string;
+};
+
+// -----------------------------------------------------------------------------
+// Workflow Implementation
+// -----------------------------------------------------------------------------
+
+export class PromptEnhancementWorkflow extends WorkflowEntrypoint<Env, WorkflowInput> {
+	async run(event: WorkflowEvent<WorkflowInput>, step: WorkflowStep) {
+		const { prompt, tone = "professional", targetModel = "General LLM" } = event.payload;
+		const modelId = "@cf/meta/llama-3-8b-instruct"; // Using Llama 3 for instruction following
+
+		// -------------------------------------------------------------------------
+		// Step 1: Analyze the User's Prompt
+		// -------------------------------------------------------------------------
+		const analysis = await step.do("analyze-prompt", async () => {
+			const systemMsg = `You are a senior Prompt Engineer. Analyze the user's prompt. 
+            Identify the core intent, strengths, and specific weaknesses (ambiguity, lack of context). 
+            Output valid JSON only.`;
+
+			const userMsg = `Prompt: "${prompt}"`;
+
+			const response = await this.env.AI.run(modelId, {
+				messages: [
+					{ role: "system", content: systemMsg },
+					{ role: "user", content: userMsg },
 				],
-			};
-		});
-
-		// You can optionally have a Workflow wait for additional data,
-		// human approval or an external webhook or HTTP request, before progressing.
-		// You can submit data via HTTP POST to /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{eventName}
-		const waitForApproval = await step.waitForEvent("request-approval", {
-			type: "approval", // define an optional key to switch on
-			timeout: "1 minute", // keep it short for the example!
-		});
-
-		const apiResponse = await step.do("some other step", async () => {
-			let resp = await fetch("https://api.cloudflare.com/client/v4/ips");
-			return await resp.json<any>();
-		});
-
-		await step.sleep("wait on something", "1 minute");
-
-		await step.do(
-			"make a call to write that could maybe, just might, fail",
-			// Define a retry strategy
-			{
-				retries: {
-					limit: 5,
-					delay: "5 second",
-					backoff: "exponential",
+				response_format: {
+					type: "json_schema",
+					json_schema: {
+						type: "object",
+						properties: {
+							intent: { type: "string" },
+							strengths: { type: "array", items: { type: "string" } },
+							weaknesses: { type: "array", items: { type: "string" } },
+							missing_context: { type: "boolean" },
+						},
+						required: ["intent", "strengths", "weaknesses", "missing_context"],
+					},
 				},
-				timeout: "15 minutes",
-			},
-			async () => {
-				// Do stuff here, with access to the state from our previous steps
-				if (Math.random() > 0.5) {
-					throw new Error("API call to $STORAGE_SYSTEM failed");
-				}
-			},
-		);
+			});
+
+			// @ts-ignore - Cloudflare AI types might not strictly infer JSON output yet
+			return JSON.parse(response.response as string) as AnalysisResult;
+		});
+
+		// -------------------------------------------------------------------------
+		// Step 2: Determine Optimization Strategy
+		// -------------------------------------------------------------------------
+		const strategy = await step.do("select-strategy", async () => {
+			const systemMsg = `Based on the prompt analysis, select the best prompting technique.
+            Options: CO-STAR (Context, Objective, Style, Tone, Audience, Response), Chain-of-Thought, Role-Prompting, Few-Shot.
+            Output valid JSON only.`;
+
+			const userMsg = `Analysis: ${JSON.stringify(analysis)}`;
+
+			const response = await this.env.AI.run(modelId, {
+				messages: [
+					{ role: "system", content: systemMsg },
+					{ role: "user", content: userMsg },
+				],
+				response_format: {
+					type: "json_schema",
+					json_schema: {
+						type: "object",
+						properties: {
+							technique: { type: "string" },
+							reasoning: { type: "string" },
+							suggested_role: { type: "string" },
+						},
+						required: ["technique", "reasoning", "suggested_role"],
+					},
+				},
+			});
+
+			// @ts-ignore
+			return JSON.parse(response.response as string) as StrategyResult;
+		});
+
+		// -------------------------------------------------------------------------
+		// Step 3: Generate Enhanced Prompt
+		// -------------------------------------------------------------------------
+		const enhancement = await step.do("generate-enhancement", async () => {
+			const systemMsg = `You are an expert Prompt Engineer. Rewrite the original prompt using the ${strategy.technique} technique.
+            Role: ${strategy.suggested_role}.
+            Target Model: ${targetModel}.
+            Tone: ${tone}.
+            Address these weaknesses: ${analysis.weaknesses.join(", ")}.
+            Output valid JSON only.`;
+
+			const userMsg = `Original Prompt: "${prompt}"`;
+
+			const response = await this.env.AI.run(modelId, {
+				messages: [
+					{ role: "system", content: systemMsg },
+					{ role: "user", content: userMsg },
+				],
+				response_format: {
+					type: "json_schema",
+					json_schema: {
+						type: "object",
+						properties: {
+							enhanced_prompt: { type: "string" },
+							changelog: { type: "string", description: "Brief explanation of changes made" },
+						},
+						required: ["enhanced_prompt", "changelog"],
+					},
+				},
+			});
+
+			// @ts-ignore
+			const result = JSON.parse(response.response as string);
+			
+			return {
+				original: prompt,
+				enhanced_prompt: result.enhanced_prompt,
+				technique_used: strategy.technique,
+				changelog: result.changelog,
+			} as FinalResult;
+		});
+
+		return enhancement;
 	}
 }
+
+// -----------------------------------------------------------------------------
+// API Entrypoint
+// -----------------------------------------------------------------------------
+
 export default {
 	async fetch(req: Request, env: Env): Promise<Response> {
-		let url = new URL(req.url);
+		const url = new URL(req.url);
 
-		if (url.pathname.startsWith("/favicon")) {
-			return Response.json({}, { status: 404 });
-		}
+		// POST /start - Trigger the workflow
+		if (req.method === "POST" && url.pathname === "/enhance") {
+			const payload = await req.json<WorkflowInput>();
+			
+			// Validate payload
+			if (!payload.prompt) {
+				return Response.json({ error: "Missing 'prompt' in body" }, { status: 400 });
+			}
 
-		// Get the status of an existing instance, if provided
-		// GET /?instanceId=<id here>
-		let id = url.searchParams.get("instanceId");
-		if (id) {
-			let instance = await env.MY_WORKFLOW.get(id);
+			const instance = await env.PROMPT_WORKFLOW.create({
+				id: crypto.randomUUID(), // Unique ID for this run
+				params: payload,
+			});
+
 			return Response.json({
-				status: await instance.status(),
+				status: "started",
+				id: instance.id,
+				monitor_url: `/status?id=${instance.id}`,
 			});
 		}
 
-		// Spawn a new instance and return the ID and status
-		let instance = await env.MY_WORKFLOW.create();
-		// You can also set the ID to match an ID in your own system
-		// and pass an optional payload to the Workflow
-		// let instance = await env.MY_WORKFLOW.create({
-		// 	id: 'id-from-your-system',
-		// 	params: { payload: 'to send' },
-		// });
-		return Response.json({
-			id: instance.id,
-			details: await instance.status(),
-		});
+		// GET /status?id=... - Check status
+		if (req.method === "GET" && url.pathname === "/status") {
+			const id = url.searchParams.get("id");
+			if (!id) return Response.json({ error: "Missing 'id'" }, { status: 400 });
+
+			try {
+				const instance = await env.PROMPT_WORKFLOW.get(id);
+				const status = await instance.status();
+				return Response.json(status);
+			} catch (e) {
+				return Response.json({ error: "Instance not found" }, { status: 404 });
+			}
+		}
+
+		return new Response("Not Found", { status: 404 });
 	},
 };

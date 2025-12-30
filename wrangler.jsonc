@@ -6,6 +6,9 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "disco",
 	"main": "src/index.ts",
+    "compatibility_flags": [
+    "nodejs_compat"
+  ],
 	"compatibility_date": "2025-12-05",
 	"observability": {
 		"enabled": true
@@ -46,5 +49,28 @@
 			"binding": "MY_WORKFLOW",
 			"class_name": "MyWorkflow"
 		}
-	]
+	],
+"durable_objects": {
+    "bindings": [
+      {
+        "name": "MY_CONTAINER",
+        "class_name": "MyContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "MyContainer"
+      ]
+    }
+  ],
+"r2_buckets": [
+    {
+      "binding": "MY_BUCKET",
+      "bucket_name": "<YOUR_BUCKET_NAME>"
+    }
+  ],
+
 }

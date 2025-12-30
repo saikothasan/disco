@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "withered-sound-bbb3",
+	"name": "disco",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-12-05",
 	"observability": {

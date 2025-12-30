@@ -42,7 +42,7 @@
 	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
 	"workflows": [
 		{
-			"name": "workflows-hello-world",
+			"name": "workflows",
 			"binding": "MY_WORKFLOW",
 			"class_name": "MyWorkflow"
 		}

@@ -69,7 +69,7 @@
 "r2_buckets": [
     {
       "binding": "MY_BUCKET",
-      "bucket_name": "<YOUR_BUCKET_NAME>"
+      "bucket_name": "opd"
     }
   ],
 
